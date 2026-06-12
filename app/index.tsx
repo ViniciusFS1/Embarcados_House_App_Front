@@ -1,107 +1,156 @@
-import React, { useState } from 'react';
-import { 
-  StyleSheet, 
-  Text, 
-  View, 
-  TouchableOpacity, 
-  ScrollView, 
-  SafeAreaView, 
-  useColorScheme 
-} from 'react-native';
-import { MaterialCommunityIcons } from '@expo/vector-icons';
+// app/index.tsx
+import React, { useState, useEffect, useRef } from 'react';
+import { StyleSheet, View, ScrollView, SafeAreaView, useColorScheme, ActivityIndicator, Alert } from 'react-native';
+import { SystemToggleButton } from '../components/SystemToggleButton';
+import { SensorCard } from '../components/SensorCard';
+
+const API_BASE_URL = 'http://192.168.15.117:8000';
+const WS_BASE_URL = 'ws://192.168.15.117:8000';
+
+// Definição da estrutura dos sensores do sistema
+interface SensorStates {
+  ultrassonico: boolean;
+  pir: boolean;
+  obstaculos: boolean;
+  porta_principal: boolean;
+  janela: boolean;
+}
+
+const initialSensorState: SensorStates = {
+  ultrassonico: false,
+  pir: false,
+  obstaculos: false,
+  porta_principal: false,
+  janela: false,
+};
 
 export default function HomeScreen() {
-  const [sensor1Active, setSensor1Active] = useState(false);
-  const [sensor2Active, setSensor2Active] = useState(false);
+  const [isArmed, setIsArmed] = useState<boolean>(false);
+  const [sensorAlerts, setSensorAlerts] = useState<SensorStates>(initialSensorState);
+  const [isLoading, setIsLoading] = useState<boolean>(true);
+  const [isServerOnline, setIsServerOnline] = useState<boolean>(false);
   
   const colorScheme = useColorScheme();
   const isDark = colorScheme === 'dark';
+  const ws = useRef<WebSocket | null>(null);
+  const reconnectTimeout = useRef<NodeJS.Timeout | null>(null);
 
-  // Componente de Cartão de Sensor reaproveitável
-  const SensorCard = ({ name, icon, isActive, setIsActive }) => (
-    <TouchableOpacity 
-      activeOpacity={0.7}
-      onPress={() => setIsActive(!isActive)}
-      style={[
-        styles.card, 
-        isActive ? styles.cardActive : (isDark ? styles.cardDark : styles.cardLight)
-      ]}
-    >
-      <View style={[
-        styles.iconContainer, 
-        { backgroundColor: isActive ? 'rgba(255,255,255,0.2)' : 'rgba(148,163,184,0.1)' }
-      ]}>
-        <MaterialCommunityIcons 
-          name={icon} 
-          size={32} 
-          color={isActive ? "#fff" : (isDark ? "#94a3b8" : "#64748b")} 
-        />
-      </View>
-      
-      <View style={styles.infoContainer}>
-        <Text style={[
-          styles.sensorName, 
-          { color: isActive ? "#fff" : (isDark ? "#f1f5f9" : "#1e293b") }
-        ]}>
-          {name}
-        </Text>
-        <Text style={[
-          styles.statusText, 
-          { color: isActive ? "#dbeafe" : "#94a3b8" }
-        ]}>
-          {isActive ? "Monitorando..." : "Desconectado"}
-        </Text>
-      </View>
+  const fetchInitialStatus = async () => {
+    try {
+      const response = await fetch(`${API_BASE_URL}/status`);
+      if (!response.ok) throw new Error();
+      const data = await response.json();
+      setIsArmed(data.armed === 1);
+      setIsServerOnline(true);
+    } catch (error) {
+      setIsServerOnline(false);
+      Alert.alert("Erro de Conexão", "Não foi possível buscar o status inicial.");
+    } finally {
+      setIsLoading(false);
+    }
+  };
 
-      <View style={[
-        styles.badge, 
-        { backgroundColor: isActive ? "#22c55e" : "#ef4444" }
-      ]}>
-        <Text style={styles.badgeText}>{isActive ? "ON" : "OFF"}</Text>
+  const connectWebSocket = () => {
+    ws.current = new WebSocket(`${WS_BASE_URL}/ws/alerts`);
+    
+    ws.current.onopen = () => setIsServerOnline(true);
+    
+    ws.current.onmessage = (e) => {
+      try {
+        const data = JSON.parse(e.data);
+        
+        // Espera um JSON do tipo: { "sensor": "pir", "alert": true }
+        if (data.sensor && data.alert !== undefined) {
+          setSensorAlerts(prev => ({
+            ...prev,
+            [data.sensor]: data.alert
+          }));
+        }
+      } catch (err) {
+        console.error("Erro ao processar mensagem do WS:", err);
+      }
+    };
+    
+    ws.current.onerror = () => setIsServerOnline(false);
+    
+    ws.current.onclose = () => {
+      setIsServerOnline(false);
+      if (reconnectTimeout.current) clearTimeout(reconnectTimeout.current);
+      reconnectTimeout.current = setTimeout(connectWebSocket, 5000);
+    };
+  };
+
+  const toggleSystemControl = async () => {
+    const nextState = isArmed ? 0 : 1;
+    try {
+      const response = await fetch(`${API_BASE_URL}/control?ativo=${nextState}`, { method: 'POST' });
+      if (response.ok) {
+        setIsArmed(nextState === 1);
+        // Reseta todos os alertas se o alarme for desligado pelo usuário
+        if (nextState === 0) setSensorAlerts(initialSensorState);
+      } else {
+        throw new Error();
+      }
+    } catch (error) { 
+      Alert.alert("Erro", "Falha ao comunicar com o ESP32."); 
+    }
+  };
+
+  useEffect(() => {
+    fetchInitialStatus();
+    connectWebSocket();
+    
+    return () => { 
+      ws.current?.close(); 
+      if (reconnectTimeout.current) clearTimeout(reconnectTimeout.current);
+    };
+  }, []);
+
+  if (isLoading) {
+    return (
+      <View style={styles.centered}>
+        <ActivityIndicator size="large" color={isDark ? '#fff' : '#000'} />
       </View>
-    </TouchableOpacity>
-  );
+    );
+  }
 
   return (
-    <SafeAreaView style={[
-      styles.container, 
-      { backgroundColor: isDark ? '#111827' : '#F8FAFC' }
-    ]}>
+    <SafeAreaView style={[styles.container, { backgroundColor: isDark ? '#111827' : '#F8FAFC' }]}>
       <ScrollView contentContainerStyle={styles.scrollContent}>
-        <View style={styles.header}>
-          <Text style={[
-            styles.welcomeText, 
-            { color: isDark ? '#fff' : '#0f172a' }
-          ]}>
-            Meus Sensores
-          </Text>
-          <Text style={styles.subTitle}>Gerenciamento em tempo real</Text>
-        </View>
-
+        
+        <SystemToggleButton isArmed={isArmed} onPress={toggleSystemControl} />
+        
         <View style={styles.grid}>
           <SensorCard 
-            name="Sensor de Presença"
-            icon="motion-sensor"
-            isActive={sensor1Active}
-            setIsActive={setSensor1Active}
+            name="Garagem (Ultrassônico)" 
+            icon="arrow-expand-horizontal" 
+            isTriggered={isArmed && sensorAlerts.ultrassonico} 
+            isConnected={isServerOnline} 
           />
-          
           <SensorCard 
-            name="Sensor de Umidade"
-            icon="water-percent"
-            isActive={sensor2Active}
-            setIsActive={setSensor2Active}
+            name="Presença Sala (PIR)" 
+            icon="motion-sensor" 
+            isTriggered={isArmed && sensorAlerts.pir} 
+            isConnected={isServerOnline} 
           />
-        </View>
-
-        {/* Resumo visual rápido */}
-        <View style={[
-          styles.summary, 
-          { backgroundColor: isDark ? '#1F2937' : '#fff' }
-        ]}>
-          <Text style={[styles.summaryTitle, { color: isDark ? '#94a3b8' : '#64748b' }]}>
-            Dispositivos Ativos: { [sensor1Active, sensor2Active].filter(Boolean).length } / 2
-          </Text>
+          <SensorCard 
+            name="Corredor (Obstáculos)" 
+            icon="sensor" 
+            isTriggered={isArmed && sensorAlerts.obstaculos} 
+            isConnected={isServerOnline} 
+          />
+          <SensorCard 
+            name="Porta Principal (Reed 1)" 
+            icon="door" 
+            isTriggered={isArmed && sensorAlerts.porta_principal} 
+            isConnected={isServerOnline} 
+          />
+          <SensorCard 
+            name="Janela (Reed 2)" 
+            icon="window-maximize" 
+            isTriggered={isArmed && sensorAlerts.janela} 
+            isConnected={isServerOnline} 
+          />
         </View>
       </ScrollView>
     </SafeAreaView>
@@ -110,47 +159,7 @@ export default function HomeScreen() {
 
 const styles = StyleSheet.create({
   container: { flex: 1 },
-  scrollContent: { padding: 20 },
-  header: { marginBottom: 25 },
-  welcomeText: { fontSize: 28, fontWeight: 'bold' },
-  subTitle: { fontSize: 16, color: '#64748b', marginTop: 4 },
-  grid: { gap: 16 },
-  card: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    padding: 22,
-    borderRadius: 24,
-    borderWidth: 1,
-    borderColor: 'transparent',
-    elevation: 4,
-    shadowColor: "#000",
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.1,
-    shadowRadius: 8,
-  },
-  cardActive: { backgroundColor: '#2563EB' },
-  cardLight: { backgroundColor: '#fff', borderColor: '#e2e8f0' },
-  cardDark: { backgroundColor: '#1F2937', borderColor: '#374151' },
-  iconContainer: { 
-    width: 56, 
-    height: 56, 
-    borderRadius: 16, 
-    justifyContent: 'center', 
-    alignItems: 'center' 
-  },
-  infoContainer: { flex: 1, marginLeft: 16 },
-  sensorName: { fontSize: 18, fontWeight: 'bold' },
-  statusText: { fontSize: 14, marginTop: 2 },
-  badge: { paddingHorizontal: 12, paddingVertical: 6, borderRadius: 12 },
-  badgeText: { color: '#fff', fontSize: 12, fontWeight: 'bold' },
-  summary: {
-    marginTop: 30,
-    padding: 15,
-    borderRadius: 15,
-    alignItems: 'center',
-    borderStyle: 'dashed',
-    borderWidth: 1,
-    borderColor: '#94a3b8'
-  },
-  summaryTitle: { fontSize: 14, fontWeight: '500' }
+  centered: { flex: 1, justifyContent: 'center', alignItems: 'center' },
+  scrollContent: { padding: 20, gap: 20 }, // Adicionado gap para separar botão do grid
+  grid: { gap: 16 }
 });
