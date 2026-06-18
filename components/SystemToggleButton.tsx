@@ -1,49 +1,68 @@
+// components/SystemToggleButton.tsx
 import React from 'react';
-import { StyleSheet, Text, TouchableOpacity } from 'react-native';
-import { MaterialCommunityIcons } from '@expo/vector-icons';
+import { StyleSheet, Text, Pressable, View } from 'react-native';
 
-interface SystemToggleButtonProps {
-  isArmed: boolean;
+interface ToggleButtonProps {
+  status: number; // 0 = Armado, 1 = Desarmado, 2 = Ativado
   onPress: () => void;
 }
 
-export const SystemToggleButton: React.FC<SystemToggleButtonProps> = ({ isArmed, onPress }) => {
+export function SystemToggleButton({ status, onPress }: ToggleButtonProps) {
+  
+  // Define os estilos dinamicamente baseado no status
+  const getButtonStyle = () => {
+    switch (status) {
+      case 0: // Armado
+        return styles.btnArmed;
+      case 2: // Ativado (Disparado)
+        return styles.btnTriggered;
+      case 1: // Desarmado
+      default:
+        return styles.btnDisarmed;
+    }
+  };
+
+  const getButtonText = () => {
+    switch (status) {
+      case 0: return 'SISTEMA ARMADO';
+      case 2: return 'ALERTA: DISPARADO!';
+      case 1: return 'SISTEMA DESARMADO';
+      default: return 'DESCONHECIDO';
+    }
+  };
+
   return (
-    <TouchableOpacity 
-      activeOpacity={0.8}
-      onPress={onPress}
-      style={[styles.mainButton, isArmed ? styles.buttonArmed : styles.buttonDisarmed]}
-    >
-      <MaterialCommunityIcons 
-        name={isArmed ? "shield-check" : "shield-off"} 
-        size={40} 
-        color="#fff" 
-      />
-      <Text style={styles.mainButtonText}>
-        {isArmed ? "SISTEMA ARMADO" : "SISTEMA DESARMADO"}
-      </Text>
-      <Text style={styles.mainButtonSub}>
-        {isArmed ? "Toque para Desarmar" : "Toque para Armar"}
-      </Text>
-    </TouchableOpacity>
+    <Pressable style={[styles.button, getButtonStyle()]} onPress={onPress}>
+      <Text style={styles.text}>{getButtonText()}</Text>
+    </Pressable>
   );
-};
+}
 
 const styles = StyleSheet.create({
-  mainButton: {
+  button: {
     padding: 24,
-    borderRadius: 24,
+    borderRadius: 12,
     alignItems: 'center',
     justifyContent: 'center',
     elevation: 4,
-    shadowColor: "#000",
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.15,
-    shadowRadius: 10,
-    marginBottom: 10
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.25,
+    shadowRadius: 3.84,
   },
-  buttonArmed: { backgroundColor: '#16a34a' }, 
-  buttonDisarmed: { backgroundColor: '#dc2626' }, 
-  mainButtonText: { color: '#fff', fontSize: 20, fontWeight: 'bold', marginTop: 10 },
-  mainButtonSub: { color: 'rgba(255,255,255,0.8)', fontSize: 13, marginTop: 4 }
+  btnDisarmed: {
+    backgroundColor: '#6B7280', // Cinza
+  },
+  btnArmed: {
+    backgroundColor: '#10B981', // Verde
+  },
+  btnTriggered: {
+    backgroundColor: '#EF4444', // Vermelho para o Estado Ativado/Disparado
+  },
+  text: {
+    color: '#FFF',
+    fontSize: 18,
+    fontWeight: 'bold',
+    textAlign: 'center',
+  },
 });
