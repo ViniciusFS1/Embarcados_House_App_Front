@@ -4,7 +4,7 @@ import { StyleSheet, View, ScrollView, SafeAreaView, useColorScheme, ActivityInd
 import { SystemToggleButton } from '../components/SystemToggleButton';
 import { SensorCard } from '../components/SensorCard';
 
-const API_BASE_URL = 'https://glitchdev.cloud';
+const API_BASE_URL = 'https://embarcados.glitchdev.cloud';
 const WS_BASE_URL = 'ws://embarcados.glitchdev.cloud';
 
 interface SensorStates {
