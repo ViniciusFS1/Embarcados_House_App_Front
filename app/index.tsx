@@ -24,7 +24,8 @@ const initialSensorState: SensorStates = {
 };
 
 export default function HomeScreen() {
-  const [isArmed, setIsArmed] = useState<boolean>(false);
+  // 0 = Armado, 1 = Desarmado, 2 = Ativado
+  const [systemStatus, setSystemStatus] = useState<number>(1); 
   const [sensorAlerts, setSensorAlerts] = useState<SensorStates>(initialSensorState);
   const [isLoading, setIsLoading] = useState<boolean>(true);
   const [isServerOnline, setIsServerOnline] = useState<boolean>(false);
@@ -33,21 +34,22 @@ export default function HomeScreen() {
   const colorScheme = useColorScheme();
   const isDark = colorScheme === 'dark';
   
-  const ws = useRef<WebSocket | null>(null);
-  const reconnectTimeout = useRef<NodeJS.Timeout | null>(null);
-  const statusInterval = useRef<NodeJS.Timeout | null>(null);
-  const isUpdatingBackground = useRef<boolean>(false);
+  const wsAlerts = useRef<WebSocket | null>(null);
+  const wsStatus = useRef<WebSocket | null>(null);
+  
+  const alertsReconnectTimeout = useRef<NodeJS.Timeout | null>(null);
+  const statusReconnectTimeout = useRef<NodeJS.Timeout | null>(null);
 
+  // Executado apenas uma vez no início para garantir o estado inicial correto caso o WS demore a conectar
   const verifyCurrentStatus = async (showErrorAlert = false) => {
     try {
       const response = await fetch(`${API_BASE_URL}/status`);
       if (!response.ok) throw new Error();
       const data = await response.json();
       
-      const serverArmed = data.armed === 1;
+      const serverStatus = data.status !== undefined ? data.status : (data.armed === 1 ? 0 : 1);
       
-      // Só altera o estado se o valor bruto realmente mudou
-      setIsArmed(prev => (prev !== serverArmed ? serverArmed : prev));
+      setSystemStatus(prev => (prev !== serverStatus ? serverStatus : prev));
       setIsServerOnline(true);
     } catch (error) {
       setIsServerOnline(false);
@@ -59,11 +61,11 @@ export default function HomeScreen() {
     }
   };
 
-  const connectWebSocket = () => {
-    ws.current = new WebSocket(`${WS_BASE_URL}/ws/alerts`);
-    ws.current.onopen = () => setIsServerOnline(true);
+  const connectAlertsWebSocket = () => {
+    wsAlerts.current = new WebSocket(`${WS_BASE_URL}/ws/alerts`);
+    wsAlerts.current.onopen = () => setIsServerOnline(true);
     
-    ws.current.onmessage = (e) => {
+    wsAlerts.current.onmessage = (e) => {
       try {
         const data = JSON.parse(e.data);
         if (data.sensor && data.alert !== undefined) {
@@ -73,15 +75,42 @@ export default function HomeScreen() {
           }));
         }
       } catch (err) {
-        console.error("Erro ao processar mensagem do WS:", err);
+        console.error("Erro ao processar mensagem do WS de Alertas:", err);
       }
     };
     
-    ws.current.onerror = () => setIsServerOnline(false);
-    ws.current.onclose = () => {
+    wsAlerts.current.onerror = () => setIsServerOnline(false);
+    wsAlerts.current.onclose = () => {
       setIsServerOnline(false);
-      if (reconnectTimeout.current) clearTimeout(reconnectTimeout.current);
-      reconnectTimeout.current = setTimeout(connectWebSocket, 5000);
+      if (alertsReconnectTimeout.current) clearTimeout(alertsReconnectTimeout.current);
+      alertsReconnectTimeout.current = setTimeout(connectAlertsWebSocket, 5000);
+    };
+  };
+
+  const connectStatusWebSocket = () => {
+    wsStatus.current = new WebSocket(`${WS_BASE_URL}/ws/status`);
+    wsStatus.current.onopen = () => setIsServerOnline(true);
+    
+    wsStatus.current.onmessage = (e) => {
+      try {
+        const data = JSON.parse(e.data);
+        if (data.status !== undefined) {
+          setSystemStatus(data.status);
+          
+          if (data.status === 1) {
+            setSensorAlerts(initialSensorState);
+          }
+        }
+      } catch (err) {
+        console.error("Erro ao processar mensagem do WS de Status:", err);
+      }
+    };
+    
+    wsStatus.current.onerror = () => setIsServerOnline(false);
+    wsStatus.current.onclose = () => {
+      setIsServerOnline(false);
+      if (statusReconnectTimeout.current) clearTimeout(statusReconnectTimeout.current);
+      statusReconnectTimeout.current = setTimeout(connectStatusWebSocket, 5000);
     };
   };
 
@@ -89,15 +118,15 @@ export default function HomeScreen() {
     if (isToggling) return; 
     setIsToggling(true); 
 
-    const nextState = isArmed ? 0 : 1;
+    const nextState = (systemStatus === 0 || systemStatus === 2) ? 0 : 1;
     const targetUrl = `${API_BASE_URL}/control?ativo=${nextState}`;
 
     try {
       const response = await fetch(targetUrl, { method: 'POST' });
       
       if (response.ok) {
-        setIsArmed(nextState === 1);
-        if (nextState === 0) setSensorAlerts(initialSensorState);
+        setSystemStatus(nextState);
+        if (nextState === 1) setSensorAlerts(initialSensorState);
       } else {
         throw new Error();
       }
@@ -111,21 +140,14 @@ export default function HomeScreen() {
 
   useEffect(() => {
     verifyCurrentStatus(true);
-    connectWebSocket();
+    connectAlertsWebSocket();
+    connectStatusWebSocket();
     
-    statusInterval.current = setInterval(() => {
-      if (!isToggling && !isUpdatingBackground.current) {
-        isUpdatingBackground.current = true;
-        verifyCurrentStatus(false).finally(() => {
-          isUpdatingBackground.current = false;
-        });
-      }
-    }, 4000);
-
     return () => { 
-      ws.current?.close(); 
-      if (reconnectTimeout.current) clearTimeout(reconnectTimeout.current);
-      if (statusInterval.current) clearInterval(statusInterval.current);
+      wsAlerts.current?.close(); 
+      wsStatus.current?.close();
+      if (alertsReconnectTimeout.current) clearTimeout(alertsReconnectTimeout.current);
+      if (statusReconnectTimeout.current) clearTimeout(statusReconnectTimeout.current);
     };
   }, []);
 
@@ -142,7 +164,8 @@ export default function HomeScreen() {
       <ScrollView contentContainerStyle={styles.scrollContent}>
         
         <View style={styles.buttonWrapper}>
-          <SystemToggleButton isArmed={isArmed} onPress={toggleSystemControl} />
+          {/* Modificado: Enviando a prop 'status' com o valor numérico (0, 1, 2) */}
+          <SystemToggleButton status={systemStatus} onPress={toggleSystemControl} />
           {isToggling && (
             <Pressable 
               style={[StyleSheet.absoluteFillObject, styles.shield]} 
@@ -152,7 +175,6 @@ export default function HomeScreen() {
         </View>
         
         <View style={styles.grid}>
-          {/* CORRIGIDO: Removido o 'isArmed &&' para isolar o estado dos sensores do polling do botão */}
           <SensorCard 
             name="Garagem (Ultrassônico)" 
             icon="arrow-expand-horizontal" 
