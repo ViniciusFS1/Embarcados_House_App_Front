@@ -3,24 +3,25 @@ import React, { useState, useEffect } from 'react';
 import { StyleSheet, Text, View, FlatList, SafeAreaView, useColorScheme, ActivityIndicator, Alert } from 'react-native';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 
-const API_BASE_URL = 'http://192.168.15.117:8000';
+const API_BASE_URL = 'https://embarcados.glitchdev.cloud';
 
 interface LogItem {
   id: string;
-  sensor: string;
+  sensor: number;
   data_hora: string;
+  zone: number;
 }
 
 // Mapa para traduzir o ID do sensor para o mesmo nome e ícone usados no Dashboard
-const sensorMap: Record<string, { name: string; icon: keyof typeof MaterialCommunityIcons.glyphMap }> = {
-  ultrassonico: { name: 'Garagem (Ultrassônico)', icon: 'arrow-expand-horizontal' },
-  pir: { name: 'Presença Sala (PIR)', icon: 'motion-sensor' },
-  obstaculos: { name: 'Corredor (Obstáculos)', icon: 'sensor' },
-  porta_principal: { name: 'Porta Principal (Reed 1)', icon: 'door' },
-  janela: { name: 'Janela (Reed 2)', icon: 'window-maximize' },
+const sensorMap: Record<number, { name: string; icon: keyof typeof MaterialCommunityIcons.glyphMap }> = {
+  3: { name: 'Garagem (Ultrassônico)', icon: 'arrow-expand-horizontal' },
+  1: { name: 'Presença Sala (PIR)', icon: 'motion-sensor' },
+  2: { name: 'Corredor (Obstáculos)', icon: 'camera' },
+  5: { name: 'Porta Principal (Reed 1)', icon: 'door' },
+  4: { name: 'Porta Sacada (Reed 2)', icon: 'window-maximize' },
 };
 
-export default function HistoricoScreen() {
+export default function HistoricoScreen() { 
   const [logs, setLogs] = useState<LogItem[]>([]);
   const [isLoading, setIsLoading] = useState<boolean>(true);
   const colorScheme = useColorScheme();
@@ -29,7 +30,7 @@ export default function HistoricoScreen() {
   const fetchHistorico = async () => {
     try {
       setIsLoading(true);
-      const response = await fetch(`${API_BASE_URL}/historico`);
+      const response = await fetch(`${API_BASE_URL}/alerts`);
       if (!response.ok) throw new Error();
       const data = await response.json();
       setLogs(data);
@@ -45,7 +46,7 @@ export default function HistoricoScreen() {
   }, []);
 
   const renderLogItem = ({ item }: { item: LogItem }) => {
-    const sensorInfo = sensorMap[item.sensor] || { name: 'Sensor Desconhecido', icon: 'help-circle' };
+    const sensorInfo = sensorMap[item.zone] || { name: 'Sensor Desconhecido', icon: 'help-circle' };
     
     return (
       <View style={[
